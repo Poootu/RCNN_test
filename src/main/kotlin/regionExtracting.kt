@@ -48,7 +48,7 @@ fun test1()
     File("src/main/resources/saved/s1.png.").createNewFile()
     greyedImage2.output(PngWriter.NoCompression,File("src/main/resources/saved/s1.png"))
 
-    val segmentedGraph = (imageSegmentation(newImage as MutableList<MutableList<Int>>,30))
+    val segmentedGraph = (imageSegmentation(newImage as MutableList<MutableList<Int>>,300))
     val segmentedList = vertsToList(segmentedGraph,inputImage.height,inputImage.width)
     val segmentedImage = inputImage.map { p -> java.awt.Color((segmentedList[p.y][p.x].first),(segmentedList[p.y][p.x].second),(segmentedList[p.y][p.x].third)) }
 
@@ -142,19 +142,7 @@ fun imageSegmentation(image : MutableList<MutableList<Int>>,k : Int): MutableLis
     val height = image.size  //maybe the other way
     val width = image[0].size
     val edges = mutableListOf<Edge>()   //list of edges
-    var components: List<MutableList<Pair<Int, Int>>>/* = mutableListOf<MutableList<Edge>>()*/
-    /*
-
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%
-    /////////ATTENTION\\\\\\\\\
-    %%%%%%%%%%%%%%%%%%%%%%%%%%%
-
-    probably components need to be edges
-
-    maybe i got this
-
-
-     */
+    var components: List<Pair<MutableList<Pair<Int, Int>>,Int>> // it is a list of pairs containing list of vertices and a threshold number
     println("starting segmentation")
     for (i in 0 until height)
     {
@@ -166,32 +154,24 @@ fun imageSegmentation(image : MutableList<MutableList<Int>>,k : Int): MutableLis
     }
     edges.sortBy { it.weight }
 //    components = edges.map { mutableListOf(it) } as MutableList<MutableList<Edge>>
-    components =( edges.map { mutableListOf(it.v1) } + edges.map { mutableListOf(it.v2) }).distinct().toMutableList()
-//    for(repeat in 0..0){
+    components =( edges.map {Pair(mutableListOf(it.v1),k )} + edges.map { Pair(mutableListOf(it.v2),k) }).distinctBy{it.first}.toMutableList()
         for (i in 0 until edges.size) {
             try{
                 val C1 =
-                    components.first() { if(it.find {it == edges[i].v1 } != null) true else false }
+                    components.first() { if(it.first.find {it == edges[i].v1 } != null) true else false }
                 val C2 =
-                    components.first() { if(it.find {it == edges[i].v2 } != null) true else false }
-//                println(components)
-                if (C1 != C2 && edges[i].weight <= MIntDiff((findEdges(C1,edges)+ edges[i]) as MutableList<Edge>,
-                        (findEdges(C2,edges)+ edges[i]) as MutableList<Edge>, k)) {
-//                    println(i)
-//                println(C1 != C2)
+                    components.first() { if(it.first.find {it == edges[i].v2 } != null) true else false }
+                if (C1 != C2 && edges[i].weight <= C1.second && edges[i].weight <= C2.second) {
                     components.remove(C2)
                     components.remove(C1)
-                    var C3 = (C1+C2).toMutableList()
-                    components.add(C3)
-                    println(components.size)
+                    components.add(Pair(C1.first + C2.first,edges[i].weight + (k/(C1.first.size+C2.first.size))) as Pair<MutableList<Pair<Int, Int>>, Int>)
                 }///////merging edge is maximum in the component cause they are ordered
 
             }
             catch (e :Exception){}
-//        }
     }
     println("segmentation finished")
-    return components
+    return components.map { it.first }.toMutableList()
     }
 
 fun findEdges(
