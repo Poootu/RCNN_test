@@ -4,17 +4,17 @@ import com.sksamuel.scrimage.ImmutableImage
 import com.sksamuel.scrimage.filter.GaussianBlurFilter
 import com.sksamuel.scrimage.nio.PngWriter
 import java.io.File
+import kotlin.collections.forEach
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.random.Random
-
 fun test1()
 {
-    val imageFile = File("src/main/resources/cat.png")
+    val imageFile = File("src/main/resources/img.png")
     var inputImage = ImmutableImage.loader().fromFile(imageFile)
     val listImage = mutableListOf<Int>()
-    val filter = GaussianBlurFilter(1)
+//    val filter = GaussianBlurFilter(1)
 //    inputImage = inputImage.filter(filter)
 
     //var greyedImage = inputImage.map { p -> java.awt.Color(inputImage.pixel(p.x,p.y).toAverageGrayscale().toInt()) }
@@ -29,25 +29,47 @@ fun test1()
     var newImage=to2d(listImage,inputImage.width,inputImage.height)
 //    println(newImage.forEachIndexed { index, pixel -> pixel.forEachIndexed { j, pixel -> println("$index  $j") } })
 
-/*    val region1 = mutableListOf<Edge>(
-        Edge(v1 = Pair(0,0), v2 = Pair(0,1), 2),
-        Edge(v1 = Pair(0,0), v2 = Pair(1,1), 1),
-        Edge(v1 = Pair(0,1), v2 = Pair(1,1), 2),
-        Edge(v1 = Pair(1,0), v2 = Pair(1,1), 3)
+/*
+    val region1 = mutableListOf<Edge>(
+        Edge(v1 = Pair(0,0), v2 = Pair(2,2), 75),
+        Edge(v1 = Pair(0,0), v2 = Pair(1,1), 9),
+        Edge(v1 = Pair(1,1), v2 = Pair(2,2), 95),
+        Edge(v1 = Pair(2,2), v2 = Pair(3,3), 51),
+        Edge(v1 = Pair(1,1), v2 = Pair(3,3), 19),
+        Edge(v1 = Pair(1,1), v2 = Pair(4,4), 42),
+        Edge(v1 = Pair(4,4), v2 = Pair(3,3), 31)
     )
     println("starting msp")
     println(minimumSpanningTree(region1).size)
-    println(minimumSpanningTree(region1))*/
+    println(minimumSpanningTree(region1))
+*/
 
     var greyedImage2 = inputImage.map { p -> java.awt.Color((newImage[p.y][p.x]),(newImage[p.y][p.x]),(newImage[p.y][p.x])) }
     File("src/main/resources/saved/s1.png.").createNewFile()
     greyedImage2.output(PngWriter.NoCompression,File("src/main/resources/saved/s1.png"))
 
-    val segmentedGraph = (imageSegmentation(newImage as MutableList<MutableList<Int>>,150))
-    val segmentedList = graphToList(segmentedGraph,inputImage.height,inputImage.width)
+    val segmentedGraph = (imageSegmentation(newImage as MutableList<MutableList<Int>>,30))
+    val segmentedList = vertsToList(segmentedGraph,inputImage.height,inputImage.width)
     val segmentedImage = inputImage.map { p -> java.awt.Color((segmentedList[p.y][p.x].first),(segmentedList[p.y][p.x].second),(segmentedList[p.y][p.x].third)) }
 
     segmentedImage.output(PngWriter.NoCompression,File("src/main/resources/saved/s1.png"))
+}
+
+fun vertsToList(
+    segmentedGraph: MutableList<MutableList<Pair<Int, Int>>>,
+    height: Int,
+    width: Int
+) : MutableList<MutableList<Triple<Int,Int,Int>>>
+        {
+        val list = MutableList(height) { MutableList(width){ Triple(0,0,0) }}
+
+        segmentedGraph.forEach {
+            val color = Triple(Random.nextInt(10,250),Random.nextInt(10,250),Random.nextInt(10,250))
+            it.forEach {
+                list[it.first][it.second] = color
+            } }
+
+        return list
 }
 
 fun graphToList(graph : MutableList<MutableList<Edge>>,height : Int, width: Int) : MutableList<MutableList<Triple<Int,Int,Int>>>
@@ -116,12 +138,11 @@ data class Edge(
     }
 }
 
-
-fun imageSegmentation(image : MutableList<MutableList<Int>>,k : Int): MutableList<MutableList<Edge>> {
+fun imageSegmentation(image : MutableList<MutableList<Int>>,k : Int): MutableList<MutableList<Pair<Int, Int>>> {
     val height = image.size  //maybe the other way
     val width = image[0].size
     val edges = mutableListOf<Edge>()   //list of edges
-    var components = mutableListOf<MutableList<Edge>>()
+    var components: List<MutableList<Pair<Int, Int>>>/* = mutableListOf<MutableList<Edge>>()*/
     /*
 
     %%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -129,7 +150,7 @@ fun imageSegmentation(image : MutableList<MutableList<Int>>,k : Int): MutableLis
     %%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     probably components need to be edges
-    
+
     maybe i got this
 
 
@@ -144,40 +165,60 @@ fun imageSegmentation(image : MutableList<MutableList<Int>>,k : Int): MutableLis
         }
     }
     edges.sortBy { it.weight }
-    components = edges.map { mutableListOf(it) } as MutableList<MutableList<Edge>>
-    for(i in 0 until edges.size)
-        {
-            val C1 = components.first() { if(it.firstOrNull() { it.v1 == edges[i].v1 || it.v2 == edges[i].v1}!= null) true else false }!!
-            val C2 = components.first() { if(it.firstOrNull() { it.v1 == edges[i].v2|| it.v2 == edges[i].v2 }!= null ) true else false }!!
-           // println("C1 : $C1, C2 : $C2")
-            if(C1 != C2 && edges[i].weight <= MIntDiff(C1,C2,k))  //try to make components saved as edges and converted to edgelists
-            {
-                println(C1 != C2)
-                components.remove(C2)
-                components.remove(C1)
-                components.add((C1 + C2) as MutableList<Edge>)
-            }
-        }
+//    components = edges.map { mutableListOf(it) } as MutableList<MutableList<Edge>>
+    components =( edges.map { mutableListOf(it.v1) } + edges.map { mutableListOf(it.v2) }).distinct().toMutableList()
+//    for(repeat in 0..0){
+        for (i in 0 until edges.size) {
+            try{
+                val C1 =
+                    components.first() { if(it.find {it == edges[i].v1 } != null) true else false }
+                val C2 =
+                    components.first() { if(it.find {it == edges[i].v2 } != null) true else false }
+//                println(components)
+                if (C1 != C2 && edges[i].weight <= MIntDiff((findEdges(C1,edges)+ edges[i]) as MutableList<Edge>,
+                        (findEdges(C2,edges)+ edges[i]) as MutableList<Edge>, k)) {
+//                    println(i)
+//                println(C1 != C2)
+                    components.remove(C2)
+                    components.remove(C1)
+                    var C3 = (C1+C2).toMutableList()
+                    components.add(C3)
+                    println(components.size)
+                }///////merging edge is maximum in the component cause they are ordered
 
+            }
+            catch (e :Exception){}
+//        }
+    }
     println("segmentation finished")
     return components
     }
 
+fun findEdges(
+    vertices: MutableList<Pair<Int, Int>>,
+    edges: MutableList<Edge>,
+
+): MutableList<Edge> {
+    return edges.filter {edge -> vertices.find { it == edge.v1 } != null  && vertices.find { it == edge.v2 }!= null  }.toMutableList()
+}
+
 
 fun MIntDiff(C1: MutableList<Edge>, C2: MutableList<Edge>, k: Int) : Int
 {
+//    println(tau(C1,k))
     return min(internalDifference(C1) + tau(C1,k),internalDifference(C2) + tau(C2,k))
 }
 fun internalDifference(C : MutableList<Edge>) : Int
 {
+    if(C.size == 1) return 0
     return minimumSpanningTree(C).maxBy { it.weight }.weight
 }
 fun tau(C : MutableList<Edge>, k: Int) : Int {
     return k / C.size
 } //return should be Int?
 
-fun edgeWeight(i: Int, i2: Int): Int {
-    return abs(i-i2) //change that later ig
+fun edgeWeight(i1: Int, i2: Int): Int {
+    return abs(i1-i2) //change that later ig
 }
 fun minimumSpanningTree(C: MutableList<Edge>) : MutableList<Edge>
 {
@@ -252,4 +293,6 @@ fun minimumSpanningTreeNew(C: MutableList<Pair<Int, Int>>) : MutableList<Edge>
     return visitedEdges
 }
 */
+
+
 
