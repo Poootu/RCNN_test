@@ -1,11 +1,6 @@
-package org.example.networkStructure
+package networkStructure
 
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import java.lang.Thread.sleep
-import java.util.Collections.shuffle
 import kotlin.math.exp
 import kotlin.random.Random
 
@@ -35,8 +30,7 @@ class Network {
     fun feedforward(input : MutableList<Double>) : MutableList<Double> {
         var previousLayer = input
         for (i in 1 until layers.size) {
-//            println(" $i - $previousLayer")
-//            println(" $i - ${layers[1].neurons[0]}")
+
             var list = mutableListOf<Double>()
             for (j in 0 until layers[i].neurons.size)
             {
@@ -64,18 +58,12 @@ class Network {
             val miniBatch = trainingData.toList().subList(i,i + miniBatchSize)
             updateMiniBatch(miniBatch, learningRate)
             println(i)
-//            println(miniBatch)
 
 //            }
 
         }
             }
-//        println("trainingData: ${trainingData[0]}")
-//        println("trainingData: ${trainingData.subList(0,1)}")
-/*        for (i in 0 until trainingData.size) {
-            if(trainingData[i].second.first() == 1.0) updateMiniBatch(trainingData.subList(i,i+1), learningRate)
 
-        }*/
 
 
     }
@@ -85,15 +73,18 @@ class Network {
         //new bias = old_bias - (learning_rate * (sum of (changes to cost/changes to bias)) / examples in a batch
 //            println("$miniBatch .")
         var sum_gradient =
-            Network(layers[0].neurons.size, layers.last().neurons.size, layers.size - 2, layers[1].neurons.size, true)
+            Network(
+                layers[0].neurons.size,
+                layers.last().neurons.size,
+                layers.size - 2,
+                layers[1].neurons.size,
+                true
+            )
         //pusta sieć jako gradient do aktualizowania
         for (i in miniBatch.indices) {
             sum_gradient += backpropagation(miniBatch[i]) //druga warstwa się nie zmienia chyba
-//            println("--------------------")
-//            println(sum_gradient.layers[2])
-//            println("========================")
+
         }
-//            println(sum_gradient)
         for (i in layers.indices)
         {
             for (j in layers[i].neurons.indices)
@@ -109,10 +100,14 @@ class Network {
     }
 
             /*private*/ fun backpropagation(trainingData: Pair<MutableList<Double>, MutableList<Double>>) : Network {
-            val gradient = Network(layers[0].neurons.size, layers.last().neurons.size, layers.size - 2, layers[1].neurons.size, true)
-/*            println("{{{{{{")
-            println(gradient)
-            println("}}}}}}}")*/
+            val gradient = Network(
+                layers[0].neurons.size,
+                layers.last().neurons.size,
+                layers.size - 2,
+                layers[1].neurons.size,
+                true
+            )
+
                 //pusta siec jako gradient do aktualizowania
 
 
@@ -134,35 +129,23 @@ class Network {
                         sum += layers[i].neurons[j].weights[k]*activations[i-1][k]
                     }
                     weighted_input.add(sum)
-//                    println(weighted_input)
                     activation.add(sigmoid(sum))
-//                    println(activation)
-//                println(sigmoid(sum))
+
                 }
                 weighted_inputs.add(weighted_input)
                 activations.add(activation)
 
 
-//                println(weighted_input)
             }
-//                println(activations)
 
 
             //backpropagation
-            //hmm why delta
 
             var delta = cost_derivative(activations.last(),trainingData.second).mapIndexed { index, d -> d*sigmoid_derivative(weighted_inputs.last()[index]) }.toMutableList() // /sigmoid prime
             for (g in gradient.layers.last().neurons.indices) gradient.layers.last().neurons[g].bias = delta[g]
-/*            gradient.layers.last().neurons.mapIndexed {index, neuron ->
-                neuron.bias = delta[index]
-            }*/
+
             for (g in gradient.layers.last().neurons.indices) gradient.layers.last().neurons[g].weights = gradient.layers.last().neurons[g].weights.mapIndexed { weightIndex, weight -> delta[g]*activations[activations.size-2][weightIndex] }.toMutableList()
-//                println(gradient.layers.last().neurons)
-                /*            gradient.layers.last().neurons.mapIndexed {index, neuron ->
-                neuron.weights.mapIndexed { weightIndex, weight -> delta[index]*activations[activations.size-2][weightIndex] }
-            }*/
-//            println(activations)
-//            println(delta)
+
             for (i in 2 until layers.size)  // .. or until?????
             {
 //            println(delta)
@@ -181,12 +164,6 @@ class Network {
                     tempDelta[j] = sum
 
 
-/*                    var sum = 0.0
-                    for (k in 0 until layers[layers.size - i + 1].neurons.size) {
-                        sum += layers[layers.size - i + 1].neurons[k].weights[j] * delta[k] * sigmoid_derivative(
-                            weighted_inputs[layers.size - i][k]
-                        ) //emm co się dzieje z sumą i czy to w ogóle ma sens
-                    }*/
                 }
 
                 delta = tempDelta
@@ -194,43 +171,16 @@ class Network {
                 for (g in gradient.layers[layers.size - i].neurons.indices) {
                     gradient.layers[layers.size - i].neurons[g].bias = delta[g]
                 }
-                /*                gradient.layers[layers.size - i].neurons.forEachIndexed {index, neuron ->
-                                    neuron.bias = delta[index]
-                                }*/
+
                 for (g in gradient.layers[layers.size - i].neurons.indices) {
-/*                    for (k in gradient.layers[layers.size - i].neurons[g].weights.indices) {
-                        println(
-                            delta[g]
-                        )
-                        println("pozdro")
-                        println(
-                            activations[activations.size - i - 1][k]
-                        )
-                    }*/
+
                     gradient.layers[layers.size - i].neurons[g].weights =
                         gradient.layers[layers.size - i].neurons[g].weights.mapIndexed { weightIndex, weight -> delta[g] * activations[activations.size - i - 1][weightIndex] }
                             .toMutableList()
 
                 }
 
-/*                for (g in gradient.layers[layers.size - i].neurons.indices) {
-                    for (k in gradient.layers[layers.size - i].neurons[g].weights.indices) {
-                        gradient.layers[layers.size - i].neurons[g].weights[k] =
-                            delta[g] * activations[activations.size - i - 1][k]
-                    }
-                }*/
-//                println(gradient.layers[layers.size - i].neurons)
 
-
-                /*                gradient.layers[layers.size - i].neurons.forEachIndexed {index, neuron ->
-                                    neuron.weights.mapIndexed { weightIndex, weight -> delta[index]*activations[activations.size-i-1][weightIndex] }
-                                }*/
-                /*runBlocking {
-//                    println(delta.size)
-//                    println( gradient.layers.last().neurons.size)
-                    println(gradient.layers[layers.size - i].neurons)
-                    sleep(3000)
-                }*/
             }
 
             return gradient
@@ -283,7 +233,13 @@ class Network {
     operator fun plus(other: Network): Network {
         //only if same size
         var newNetwork =
-            Network(layers[0].neurons.size, layers.last().neurons.size, layers.size - 2, layers[1].neurons.size, true)
+            Network(
+                     layers[0].neurons.size,
+                layers.last().neurons.size,
+                layers.size - 2,
+                layers[1].neurons.size,
+                true
+            )
         for (i in layers.indices) {
             for (j in layers[i].neurons.indices) {
                 newNetwork.layers[i].neurons[j].bias = this.layers[i].neurons[j].bias + other.layers[i].neurons[j].bias
@@ -310,7 +266,7 @@ class Layer {
     var neurons: MutableList<Neuron>
 
     constructor(numberOfNeurons: Int, inputNumber: Int, onlyZeros: Boolean) {
-        neurons = MutableList(numberOfNeurons) {Neuron(inputNumber,onlyZeros)}
+        neurons = MutableList(numberOfNeurons) { Neuron(inputNumber,onlyZeros) }
     }
 
     constructor(n: MutableList<Neuron>) {
@@ -352,9 +308,10 @@ class Neuron {
     }
 }
 
+/*
 class Constructors {
 
 
     constructor(i: Int) {
     }
-}
+}*/

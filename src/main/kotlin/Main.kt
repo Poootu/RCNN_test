@@ -1,19 +1,31 @@
 package org.example
 
 import com.sksamuel.scrimage.ImmutableImage
+import com.sksamuel.scrimage.filter.GaussianBlurFilter
+import com.sksamuel.scrimage.filter.GrayscaleFilter
+import com.sksamuel.scrimage.nio.PngWriter
 import kotlinx.coroutines.runBlocking
-import org.example.networkStructure.Layer
-import org.example.networkStructure.Network
-import org.example.networkStructure.Neuron
+import networkStructure.Layer
+import networkStructure.Network
+import networkStructure.Neuron
+import org.example.ConvolutionalNetwork.Tensor
+import org.example.ConvolutionalNetwork.createCnn
+import org.example.ConvolutionalNetwork.softmax
+import org.example.ConvolutionalNetwork.testNetwork
 import org.jetbrains.kotlinx.dl.dataset.embedded.mnist
+import org.tensorflow.op.core.HistogramFixedWidth
 import java.io.File
+import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.sqrt
+import kotlin.text.compareTo
+import kotlin.text.get
 
 //TIP To <b>Run</b> code, press <shortcut actionId="Run"/> or
 // click the <icon src="AllIcons.Actions.Execute"/> icon in the gutter.
 suspend fun main() {
-    test1()
+//    test1()
+    geminiTest()
 //    println(net.toFileString())
 //    tester()
 //    importTest()
@@ -22,6 +34,214 @@ suspend fun main() {
 //    trainingTest2Inverted()
 //    manualTest()
 //    pngTest()
+}
+
+
+
+fun geminiTest() {
+    val imageFile = File("src/main/resources/mathTestSmall.png")
+    var inputImage = ImmutableImage.loader().fromFile(imageFile)
+    val listImage = mutableListOf<Int>()
+    val filter = GaussianBlurFilter(1)
+    inputImage = inputImage.filter(filter)
+
+    //var greyedImage = inputImage.map { p -> java.awt.Color(inputImage.pixel(p.x,p.y).toAverageGrayscale().toInt()) }
+    for (i in 0 until inputImage.height)
+    {
+        for (j in 0 until inputImage.width)
+        {
+            listImage.add((inputImage.pixel(j,i).toAverageGrayscale().blue()))
+
+        }
+    }
+    var newImage=to2d(listImage,inputImage.width,inputImage.height)
+
+    var greyedImage2 = inputImage.map { p -> java.awt.Color((newImage[p.y][p.x]),(newImage[p.y][p.x]),(newImage[p.y][p.x])) }
+    File("src/main/resources/saved/s1.png.").createNewFile()
+    greyedImage2.output(PngWriter.NoCompression,File("src/main/resources/saved/s1.png"))
+
+    var segmentedGraph = (fasterImageSegmentation(listImage.toIntArray(),inputImage.width,inputImage.height,100))
+    var segmentedList = vertsToList(segmentedGraph.values.toMutableList(),inputImage.height,inputImage.width)
+    var segmentedImage = inputImage.map { p -> java.awt.Color((segmentedList[p.y][p.x].first),(segmentedList[p.y][p.x].second),(segmentedList[p.y][p.x].third)) }
+
+    var merged = GEMINIbetterSelectiveSearch(segmentedGraph,listImage.toIntArray(),inputImage.width,inputImage.height)
+    println(segmentedGraph.size)
+//    segmentedImage.output(PngWriter.NoCompression,File("src/main/resources/saved/s1.png"))
+//    segmentedList = vertsToList(merged,inputImage.height,inputImage.width)
+
+
+
+    segmentedImage = inputImage.map { p ->
+//        if(((b.x1 == p.x || b.x2 == p.x) && (b.y1 <= p.y && p.y <= b.y2)) || ((b.y1 == p.y || b.y2 == p.y) && (b.x1 <= p.x && p.x <= b.x2))) java.awt.Color(0,0,255)
+        /*else*/ java.awt.Color((segmentedList[p.y][p.x].first),(segmentedList[p.y][p.x].second),(segmentedList[p.y][p.x].third))
+    }
+    var b = merged.map{getBoundingBox(it)}.filter { it.area() > 200 }
+    var scaled = inputScaling(listImage.toIntArray(),b,inputImage.width, inputImage.height, 32,0)
+    scaled.forEachIndexed {i, it -> saveTensorAsPng(it,"src/main/resources/saved/tests/$i.png")}
+    val outlinedImage = inputImage.map { p ->
+        val x = p.x
+        val y = p.y
+        var isBoundary = false
+
+        for (box in b) {
+//        if(box.area() < 200) continue
+            // Check if the current pixel (x, y) is on any of the four edges of the bounding box.
+            // This is the logic you requested, adapted to use minX/maxX/minY/maxY from BoundingBox.
+            val onEdge = (
+                    (box.x1 == x || box.x2 == x) && (box.y1 <= y && y <= box.y2)
+                    ) || (
+                    (box.y1 == y || box.y2 == y) && (box.x1 <= x && x <= box.x2)
+                    )
+
+            if (onEdge) {
+                isBoundary = true
+                break
+            }
+        }
+
+        if (isBoundary) {
+            // Color the boundary pixel blue (0, 0, 255)
+            java.awt.Color(0, 0, 255)
+        } else {
+            // Fallback to the original pixel color
+            java.awt.Color(p.red(), p.green(), p.blue())
+        }
+    }
+
+    println(segmentedGraph.size)
+    outlinedImage.output(PngWriter.NoCompression,File("src/main/resources/saved/s2.png"))
+    segmentedImage.output(PngWriter.NoCompression,File("src/main/resources/saved/s3.png"))
+
+    val inputSize = 32
+    val channels = 1
+    val classes = 10
+
+    val cnn = createCnn(inputW = inputSize, inputH = inputSize, inputC = channels, numClasses = classes)
+
+    var trainingSamples = loadImageDataset("src/main/resources/dataset/",32).shuffled()
+    trainingSamples.forEach {
+        println(it.label)
+        cnn.train(it.tensor,intToResultTensor(it.label,10)) }
+    trainingSamples.shuffled().forEach {
+        println(it.label)
+        cnn.train(it.tensor,intToResultTensor(it.label,10)) }
+    trainingSamples.shuffled().forEach {
+        println(it.label)
+        cnn.train(it.tensor,intToResultTensor(it.label,10)) }
+
+
+    // Convert to grayscale
+
+    // Resize to network input size
+//    img = img.scaleTo(32, 32)
+    scaled.forEachIndexed {i, it ->
+        (cnn.forward(scaled[0], applySoftmax = true))
+    }
+
+/*    println(cnn.forward(scaled[0], applySoftmax = true))
+    println(cnn.forward(scaled[1143], applySoftmax = true))
+    println(cnn.forward(trainingSamples[0].tensor, applySoftmax = true))*/
+
+
+//    var regiontest = getArrayFromBox(b[0],newImage)
+//    testNetwork(regiontest)
+
+}
+
+fun intToResultTensor(number : Int, maxNumber : Int) : Tensor   //maybe change numering system later
+{
+    return Tensor(DoubleArray(maxNumber) {i -> if(i!=number) 0.0 else 1.0},1,1,maxNumber)
+}
+
+fun inputScaling(
+    image: IntArray,                 // grayscale image, 0..255 values
+    boundingBoxes: List<BoundingBox>,
+    width: Int,
+    height: Int,
+    intendedSize: Int,
+    padding: Int                    // padding around resized patch
+): List<Tensor> {
+
+    val finalSize = intendedSize + 2 * padding
+    val outputs = ArrayList<Tensor>()
+
+    for (box in boundingBoxes) {
+
+        // --- 1. Clamp bounding box to image bounds ---
+        val x1 = box.x1.coerceIn(0, width - 1)
+        val y1 = box.y1.coerceIn(0, height - 1)
+        val x2 = box.x2.coerceIn(0, width - 1)
+        val y2 = box.y2.coerceIn(0, height - 1)
+
+        if (x2 < x1 || y2 < y1)
+            continue
+
+        val bw = x2 - x1 + 1
+        val bh = y2 - y1 + 1
+
+        // --- 2. Extract patch from image ---
+        val patch = Array(bh) { IntArray(bw) }
+        for (dy in 0 until bh) {
+            val yy = y1 + dy
+            for (dx in 0 until bw) {
+                val xx = x1 + dx
+                patch[dy][dx] = image[yy * width + xx]
+            }
+        }
+
+        // --- 3. Resize patch to intendedSize×intendedSize (nearest-neighbor) ---
+        val resized = Array(intendedSize) { IntArray(intendedSize) }
+        for (y in 0 until intendedSize) {
+            val srcY = (y * bh) / intendedSize
+            for (x in 0 until intendedSize) {
+                val srcX = (x * bw) / intendedSize
+                resized[y][x] = patch[srcY][srcX]
+            }
+        }
+
+        // --- 4. Create padded canvas ---
+        val canvas = Array(finalSize) { IntArray(finalSize) { 0 } }
+
+        // place resized patch in the center
+        for (y in 0 until intendedSize) {
+            for (x in 0 until intendedSize) {
+                canvas[y + padding][x + padding] = resized[y][x]
+            }
+        }
+
+        // --- 5. Convert padded canvas to Tensor (1 channel) ---
+        val data = DoubleArray(finalSize * finalSize)
+        var idx = 0
+        for (y in 0 until finalSize) {
+            for (x in 0 until finalSize) {
+                data[idx++] = canvas[y][x] / 255.0
+            }
+        }
+
+        outputs += Tensor(
+            data = data,
+            h = finalSize,
+            w = finalSize,
+            c = 1
+        )
+    }
+
+    return outputs
+}
+
+//add padding
+fun getArrayFromBox(b : BoundingBox, image : List<List<Int>>) : DoubleArray
+{
+    var width = abs(b.x2-b.x1)
+    var proposedRegion = DoubleArray(b.area())
+    for (i in b.x1..b.x2)
+    {
+        for (j in b.y1..b.y2)
+        {
+            proposedRegion[i * width+j] = image[i][j].toDouble() / 255
+        }
+    }
+    return proposedRegion
 }
 
 fun pngTest() {
@@ -38,12 +258,20 @@ fun pngTest() {
 
 
     var networkFile = File("src/main/resources/trained")
-    var net = Network(784,10,2,10,true)
+    var net = Network(784, 10, 2, 10, true)
     var importedNet = networkFile.readLines().map { line -> line.split(" ")}.map { layer -> layer.map { it.substring(1,it.length-1).split(",") } }
 
-    net = Network(importedNet.map {layer -> Layer(layer.map
-    {neuron -> Neuron(neuron.subList(0,max(0,neuron.size-2)).map
-    { it.toDouble() }.toMutableList(),neuron.last().toDouble())}.toMutableList())}.toMutableList())
+    net = Network(importedNet.map {layer ->
+        Layer(
+            layer.map
+        { neuron ->
+            Neuron(
+                neuron.subList(0, max(0, neuron.size - 2)).map
+                { it.toDouble() }.toMutableList(), neuron.last().toDouble()
+            )
+        }.toMutableList()
+        )
+    }.toMutableList())
 
     println(net.feedforward(listImage.map { it/255.0 }.toMutableList()))
     println(net.feedforward(listImage.map { it/255.0 }.toMutableList()).max())
@@ -79,7 +307,9 @@ fun manualTest() {
 
     net = Network(importedNet.map {layer -> Layer(layer.map
     {neuron -> Neuron(neuron.subList(0,max(0,neuron.size-2)).map
-    { it.toDouble() }.toMutableList(),neuron.last().toDouble())}.toMutableList())}.toMutableList())
+    { it.toDouble() }.toMutableList(),neuron.last().toDouble())
+    }.toMutableList())
+    }.toMutableList())
 
     var stats = MutableList<Int>(10) {0}
 
@@ -443,3 +673,5 @@ fun tester() {
 
 
 }
+
+
