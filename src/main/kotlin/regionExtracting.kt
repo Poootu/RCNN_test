@@ -1094,3 +1094,124 @@ fun loadImageDataset(rootDir: String, size: Int): List<LabeledTensor> {
 
     return result
 }
+
+data class Detection(
+    val box: BoundingBox,
+    val score: Double,
+    val classId: Int
+)
+
+fun nonMaximumSuppression(
+    detections: List<Detection>,
+    iouThreshold: Double = 0.7
+): List<Detection> {
+    if (detections.isEmpty()) return emptyList()
+
+    // Sort detections by descending score
+    val sorted = detections.sortedByDescending { it.score }.toMutableList()
+    val finalDetections = mutableListOf<Detection>()
+
+    while (sorted.isNotEmpty()) {
+        val best = sorted.removeAt(0) // pick highest score
+        finalDetections.add(best)
+
+        // Remove all detections with high IoU with best
+        val iterator = sorted.iterator()
+        while (iterator.hasNext()) {
+            val det = iterator.next()
+            if (intersectionOverUnion(best.box, det.box) > iouThreshold && best.classId == det.classId) {
+                iterator.remove()
+            }
+        }
+    }
+
+    return finalDetections
+}
+
+fun nonMaximumSuppressionRCNN(
+    detections: List<Detection>,
+    iouThreshold: Double = 0.7,
+    scoreThreshold: Double = 0.0          // RCNN zazwyczaj filtruje przed NMS
+): List<Detection> {
+
+    if (detections.isEmpty()) return emptyList()
+
+    // 1. Wstępne odfiltrowanie bardzo słabych detekcji (jak w RCNN)
+    val filtered = detections.filter { it.score >= scoreThreshold }.toMutableList()
+    if (filtered.isEmpty()) return emptyList()
+
+    // 2. Sort by descending confidence
+    val sorted = filtered.sortedByDescending { it.score }.toMutableList()
+    val finalDetections = mutableListOf<Detection>()
+
+    // 3. Class-agnostic NMS (najważniejsza zmiana!)
+    while (sorted.isNotEmpty()) {
+        val best = sorted.removeAt(0)
+        finalDetections.add(best)
+
+        val iterator = sorted.iterator()
+        while (iterator.hasNext()) {
+            val det = iterator.next()
+
+            // RCNN usuwa boxy po samym IoU —
+            // KLASY SĄ IGNOROWANE na tym etapie
+            if (intersectionOverUnion(best.box, det.box) > iouThreshold) {
+                iterator.remove()
+            }
+        }
+    }
+
+    return finalDetections
+}
+
+
+fun boundingBoxToTensor(
+    image: IntArray,     // grayscale 0..255
+    width: Int,          // full image width
+    height: Int,         // full image height
+    box: BoundingBox,
+    targetSize: Int = 32 // output tensor size
+): Tensor {
+
+    // ---- 1. Clamp box inside the image ----
+    val x1 = box.x1.coerceIn(0, width - 1)
+    val y1 = box.y1.coerceIn(0, height - 1)
+    val x2 = box.x2.coerceIn(0, width - 1)
+    val y2 = box.y2.coerceIn(0, height - 1)
+
+    val bw = x2 - x1 + 1
+    val bh = y2 - y1 + 1
+
+    if (bw <= 0 || bh <= 0) {
+        // Empty → return blank tensor
+        return Tensor(DoubleArray(targetSize * targetSize), targetSize, targetSize, 1)
+    }
+
+    // ---- 2. Extract box pixels into buffer ----
+    val crop = DoubleArray(bw * bh)
+
+    var idx = 0
+    for (yy in y1..y2) {
+        val rowOffset = yy * width
+        for (xx in x1..x2) {
+            val pixel = image[rowOffset + xx]
+            crop[idx++] = pixel / 255.0
+        }
+    }
+
+    // ---- 3. Resize crop → targetSize×targetSize (nearest neighbor) ----
+    val out = DoubleArray(targetSize * targetSize)
+    val scaleX = bw.toDouble() / targetSize
+    val scaleY = bh.toDouble() / targetSize
+
+    for (ty in 0 until targetSize) {
+        val srcY = (ty * scaleY).toInt().coerceIn(0, bh - 1)
+        val srcYOff = srcY * bw
+        for (tx in 0 until targetSize) {
+            val srcX = (tx * scaleX).toInt().coerceIn(0, bw - 1)
+            out[ty * targetSize + tx] = crop[srcYOff + srcX]
+        }
+    }
+
+    return Tensor(out, targetSize, targetSize, 1)
+}

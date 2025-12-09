@@ -6,9 +6,7 @@ import com.sksamuel.scrimage.ImmutableImage
 import com.sksamuel.scrimage.color.RGBColor
 import com.sksamuel.scrimage.filter.GrayscaleFilter
 import com.sksamuel.scrimage.nio.PngWriter
-
-// Your Tensor class
-data class Tensor(val data: DoubleArray, val h: Int, val w: Int, val c: Int)
+import org.example.ConvolutionalNetwork.Tensor
 
 
 // ---------------------------------------------------------
@@ -16,22 +14,21 @@ data class Tensor(val data: DoubleArray, val h: Int, val w: Int, val c: Int)
 // ---------------------------------------------------------
 fun generateBackgroundTensorsFromFolder(
     sourceFolder: String,
-    outputCount: Int = 1000,
+    outputCount: Int = 100,
     cropSize: Int = 32,
     saveDebugPng: Boolean = false,
-    debugFolder: String = "debug_backgrounds"
+    debugFolder: String = "src/main/resources/backgroundPhotosDebug"
 ): List<Tensor> {
 
     val imgs = File(sourceFolder)
         .walkTopDown()
         .filter { it.isFile && (it.extension.lowercase() in listOf("jpg", "jpeg", "png")) }
-        .map { ImmutableImage.loader().fromFile(it) }
+        .map { ImmutableImage.loader().fromFile(it).scale(.3) }
         .toList()
 
     require(imgs.isNotEmpty()) {
         "No images found in folder: $sourceFolder"
     }
-
     val result = mutableListOf<Tensor>()
 
     if (saveDebugPng) {

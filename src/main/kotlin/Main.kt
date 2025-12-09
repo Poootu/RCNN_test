@@ -17,6 +17,7 @@ import org.tensorflow.op.core.HistogramFixedWidth
 import java.io.File
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.round
 import kotlin.math.sqrt
 import kotlin.text.compareTo
 import kotlin.text.get
@@ -39,104 +40,207 @@ suspend fun main() {
 
 
 fun geminiTest() {
+
+    // ============================================================
+    // 1. Wczytywanie obrazu + pre-processing (blur + grayscale)
+    // ============================================================
+
     val imageFile = File("src/main/resources/mathTestSmall.png")
     var inputImage = ImmutableImage.loader().fromFile(imageFile)
-    val listImage = mutableListOf<Int>()
+
+    // delikatne wygładzenie szumu
     val filter = GaussianBlurFilter(1)
     inputImage = inputImage.filter(filter)
 
-    //var greyedImage = inputImage.map { p -> java.awt.Color(inputImage.pixel(p.x,p.y).toAverageGrayscale().toInt()) }
-    for (i in 0 until inputImage.height)
-    {
-        for (j in 0 until inputImage.width)
-        {
-            listImage.add((inputImage.pixel(j,i).toAverageGrayscale().blue()))
-
+    // konwersja do grayscale (twoją metodą – warto zrobić to funkcją)
+    val listImage = mutableListOf<Int>()
+    for (y in 0 until inputImage.height) {
+        for (x in 0 until inputImage.width) {
+            listImage.add(inputImage.pixel(x, y).toAverageGrayscale().blue())
         }
     }
-    var newImage=to2d(listImage,inputImage.width,inputImage.height)
 
-    var greyedImage2 = inputImage.map { p -> java.awt.Color((newImage[p.y][p.x]),(newImage[p.y][p.x]),(newImage[p.y][p.x])) }
-    File("src/main/resources/saved/s1.png.").createNewFile()
-    greyedImage2.output(PngWriter.NoCompression,File("src/main/resources/saved/s1.png"))
+    val gray2D = to2d(listImage, inputImage.width, inputImage.height)
 
-    var segmentedGraph = (fasterImageSegmentation(listImage.toIntArray(),inputImage.width,inputImage.height,100))
-    var segmentedList = vertsToList(segmentedGraph.values.toMutableList(),inputImage.height,inputImage.width)
-    var segmentedImage = inputImage.map { p -> java.awt.Color((segmentedList[p.y][p.x].first),(segmentedList[p.y][p.x].second),(segmentedList[p.y][p.x].third)) }
-
-    var merged = GEMINIbetterSelectiveSearch(segmentedGraph,listImage.toIntArray(),inputImage.width,inputImage.height)
-    println(segmentedGraph.size)
-//    segmentedImage.output(PngWriter.NoCompression,File("src/main/resources/saved/s1.png"))
-//    segmentedList = vertsToList(merged,inputImage.height,inputImage.width)
-
-
-
-    segmentedImage = inputImage.map { p ->
-//        if(((b.x1 == p.x || b.x2 == p.x) && (b.y1 <= p.y && p.y <= b.y2)) || ((b.y1 == p.y || b.y2 == p.y) && (b.x1 <= p.x && p.x <= b.x2))) java.awt.Color(0,0,255)
-        /*else*/ java.awt.Color((segmentedList[p.y][p.x].first),(segmentedList[p.y][p.x].second),(segmentedList[p.y][p.x].third))
+    // zapis poglądowy
+    val grayImage = inputImage.map { p ->
+        val v = gray2D[p.y][p.x]
+        java.awt.Color(v, v, v)
     }
-    var b = merged.map{getBoundingBox(it)}.filter { it.area() > 200 }
-    var scaled = inputScaling(listImage.toIntArray(),b,inputImage.width, inputImage.height, 32,0)
-    scaled.forEachIndexed {i, it -> saveTensorAsPng(it,"src/main/resources/saved/tests/$i.png")}
+    grayImage.output(PngWriter.NoCompression, File("src/main/resources/saved/s1.png"))
+
+
+    // ============================================================
+    // 2. Segmentacja wstępna (superpixel / graph-based)
+    // ============================================================
+
+    println("segmenting")
+    val segmentedGraph = fasterImageSegmentation(
+        listImage.toIntArray(),
+        inputImage.width,
+        inputImage.height,
+        100
+    )
+
+    val segmentedList = vertsToList(
+        segmentedGraph.values.toMutableList(),
+        inputImage.height,
+        inputImage.width
+    )
+
+    val segmentedImage = inputImage.map { p ->
+        val (r, g, b) = segmentedList[p.y][p.x]
+        java.awt.Color(r, g, b)
+    }
+
+
+    // ============================================================
+    // 3. Łączenie regionów (Selective Search)
+    // ============================================================
+
+    println("merging")
+    val mergedRegions = GEMINIbetterSelectiveSearch(
+        segmentedGraph,
+        listImage.toIntArray(),
+        inputImage.width,
+        inputImage.height
+    )
+
+    println("Initial superpixels: ${segmentedGraph.size}")
+
+
+    // ============================================================
+    // 4. Tworzenie bounding boxów per region
+    // ============================================================
+
+    // UWAGA: area > 200 jest ZA DUŻE, małe cyfry mogą zniknąć
+    val boxes = mergedRegions
+        .map { getBoundingBox(it) }
+        .filter { it.area() > 80 }         // → DO REGULACJI (daj np. 30–80)
+    //.filter { it.area() in 30..2000 }   // polecam bardziej jak powyżej
+
+    // Skalowanie i zapisywanie każdego regionu jako tensor
+    val scaledInputs = inputScaling(
+        listImage.toIntArray(),
+        boxes,
+        inputImage.width,
+        inputImage.height,
+        32,
+        0
+    )
+
+    scaledInputs.forEachIndexed { i, tensor ->
+        saveTensorAsPng(tensor, "src/main/resources/saved/tests/$i.png")
+    }
+
+
+    // ============================================================
+    // 5. Rysowanie konturów bbox na obrazie
+    // ============================================================
+
     val outlinedImage = inputImage.map { p ->
         val x = p.x
         val y = p.y
-        var isBoundary = false
 
-        for (box in b) {
-//        if(box.area() < 200) continue
-            // Check if the current pixel (x, y) is on any of the four edges of the bounding box.
-            // This is the logic you requested, adapted to use minX/maxX/minY/maxY from BoundingBox.
-            val onEdge = (
-                    (box.x1 == x || box.x2 == x) && (box.y1 <= y && y <= box.y2)
-                    ) || (
-                    (box.y1 == y || box.y2 == y) && (box.x1 <= x && x <= box.x2)
-                    )
-
-            if (onEdge) {
-                isBoundary = true
-                break
-            }
+        val onEdge = boxes.any { box ->
+            ((box.x1 == x || box.x2 == x) && (box.y1 <= y && y <= box.y2)) ||
+                    ((box.y1 == y || box.y2 == y) && (box.x1 <= x && x <= box.x2))
         }
 
-        if (isBoundary) {
-            // Color the boundary pixel blue (0, 0, 255)
+        if (onEdge) {
             java.awt.Color(0, 0, 255)
         } else {
-            // Fallback to the original pixel color
             java.awt.Color(p.red(), p.green(), p.blue())
         }
     }
 
-    println(segmentedGraph.size)
-    outlinedImage.output(PngWriter.NoCompression,File("src/main/resources/saved/s2.png"))
-    segmentedImage.output(PngWriter.NoCompression,File("src/main/resources/saved/s3.png"))
+    outlinedImage.output(PngWriter.NoCompression, File("src/main/resources/saved/s2.png"))
+    segmentedImage.output(PngWriter.NoCompression, File("src/main/resources/saved/s3.png"))
+
+
+    // ============================================================
+    // 6. Tworzenie i trening CNN-a
+    // ============================================================
 
     val inputSize = 32
     val channels = 1
-    val classes = 10
+    val classes = 11            // 0–9 + background
 
-    val cnn = createCnn(inputW = inputSize, inputH = inputSize, inputC = channels, numClasses = classes)
+    val cnn = createCnn(
+        inputW = inputSize,
+        inputH = inputSize,
+        inputC = channels,
+        numClasses = classes
+    )
 
-    var trainingSamples = loadImageDataset("src/main/resources/dataset/",32).shuffled()
-    trainingSamples.forEach {
-        println(it.label)
-        cnn.train(it.tensor,intToResultTensor(it.label,10)) }
-    trainingSamples.shuffled().forEach {
-        println(it.label)
-        cnn.train(it.tensor,intToResultTensor(it.label,10)) }
-    trainingSamples.shuffled().forEach {
-        println(it.label)
-        cnn.train(it.tensor,intToResultTensor(it.label,10)) }
+    println("training")
 
+    // generowanie tła
+    val generatedBackground = generateBackgroundTensorsFromFolder(
+        "src/main/resources/backgroundPhotos"
+    ).map { LabeledTensor(it, 10) }
 
-    // Convert to grayscale
+    // dataset cyfr
+    val trainingSamples = loadImageDataset("src/main/resources/dataset/", 32)
+        .toMutableList()
+        .apply { addAll(generatedBackground) }
 
-    // Resize to network input size
-//    img = img.scaleTo(32, 32)
-    scaled.forEachIndexed {i, it ->
-        (cnn.forward(scaled[0], applySoftmax = true))
+    // trening epokami
+    repeat(10) { epoch ->
+        println("Epoch $epoch ...")
+        trainingSamples.shuffled().forEach { sample ->
+            cnn.train(sample.tensor, intToResultTensor(sample.label, 11))
+        }
     }
+
+
+    // ============================================================
+    // 7. Inference (wykrywanie cyfr)
+    // ============================================================
+
+    val detections = mutableListOf<Detection>()
+
+    scaledInputs.forEachIndexed { i, tensor ->
+        val output = cnn.forward(tensor, applySoftmax = true)
+
+        // znajdź najwyższe prawdopodobieństwo
+        var bestScore = 0.0
+        var bestClass = 0
+        output.data.forEachIndexed { index, value ->
+            if (value > bestScore) {
+                bestScore = value
+                bestClass = index
+            }
+        }
+
+        // próg pewności — DO REGULACJI — proponuję 0.6
+        if (bestScore > 0.3) {
+            // zapis predykcji fragmentu
+            saveTensorAsPng(
+                boundingBoxToTensor(listImage.toIntArray(), inputImage.width, inputImage.height, boxes[i]),
+                "src/main/resources/results/${bestClass} - $bestScore.png"
+            )
+
+            detections.add(Detection(boxes[i], bestScore, bestClass))
+        }
+    }
+
+
+    // ============================================================
+    // 8. (Opcjonalnie) NMS
+    // ============================================================
+
+    /*
+    val suppressed = nonMaximumSuppressionRCNN(detections, 0.5)
+    suppressed.forEach { det ->
+        saveTensorAsPng(
+            boundingBoxToTensor(listImage.toIntArray(), inputImage.width, inputImage.height, det.box),
+            "src/main/resources/results/${det.classId}_final.png"
+        )
+    }
+    */
+
+}
 
 /*    println(cnn.forward(scaled[0], applySoftmax = true))
     println(cnn.forward(scaled[1143], applySoftmax = true))
@@ -146,8 +250,11 @@ fun geminiTest() {
 //    var regiontest = getArrayFromBox(b[0],newImage)
 //    testNetwork(regiontest)
 
+fun clearFolder(folder: File) {
+    if (folder.exists() && folder.isDirectory) {
+        folder.listFiles()?.forEach { it.deleteRecursively() }
+    }
 }
-
 fun intToResultTensor(number : Int, maxNumber : Int) : Tensor   //maybe change numering system later
 {
     return Tensor(DoubleArray(maxNumber) {i -> if(i!=number) 0.0 else 1.0},1,1,maxNumber)
